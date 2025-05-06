@@ -8,7 +8,9 @@ function runSSHCommand(command, keyPath, username, host) {
   if (!username.match(/^[a-zA-Z0-9_-]+$/) || !host.match(/^[a-zA-Z0-9.-]+$/)) {
     throw new Error("Invalid username or host");
   }
-  return `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "${command}"`;
+  return `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "bash -c '${command.replace(/'/g, `'\\''`)}'"`
+
+  // return `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "${command}"`;
 }
 
 (async () => {
