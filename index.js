@@ -44,7 +44,7 @@ EOF
     const commands = [];
     commands.push('docker image prune -f --filter "dangling=true"');
 
-    const thresholdSeconds = thresholdDays ? thresholdDays * 60 : null;
+    const thresholdSeconds = thresholdDays ? thresholdDays * 86400 : null;
 
     if (thresholdSeconds) {
       commands.push(
