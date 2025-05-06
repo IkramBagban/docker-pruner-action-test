@@ -3,21 +3,19 @@ const { exec } = require("child_process");
 const os = require("os");
 const path = require("path");
 
-function generateSSHScriptCommand(command, keyContent, username, host) {
+function generateSSHScriptCommand(script, keyContent, username, host) {
   if (!username.match(/^[a-zA-Z0-9_-]+$/) || !host.match(/^[a-zA-Z0-9.-]+$/)) {
     throw new Error("Invalid username or host");
   }
-
   const keyPath = path.join(os.tmpdir(), "vm_key.pem");
-
-  return `
-    cat <<'EOF' > ${keyPath}
+  return `cat << 'KEY_EOF' > ${keyPath}
 ${keyContent}
+KEY_EOF
+chmod 600 ${keyPath}
+ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} bash -s << 'EOF'
+${script}
 EOF
-    chmod 600 ${keyPath}
-    ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} '${command}'
-    rm -f ${keyPath}
-  `.trim();
+rm -f ${keyPath}`;
 }
 
 (async () => {
@@ -25,82 +23,72 @@ EOF
     const host = core.getInput("host", { required: true });
     const username = core.getInput("username", { required: true });
     const key = core.getInput("key", { required: true });
-
-    if (!key.includes("PRIVATE KEY"))
+    if (!key.includes("PRIVATE KEY")) {
       throw new Error("Invalid SSH private key");
+    }
 
     const thresholdDaysInput = core.getInput("thresholdDays");
     const thresholdDays = thresholdDaysInput
       ? parseInt(thresholdDaysInput)
       : null;
-
     if (
       thresholdDays !== null &&
       (isNaN(thresholdDays) || thresholdDays <= 0)
     ) {
       throw new Error("thresholdDays must be a positive integer");
     }
+    const thresholdSeconds = thresholdDays ? thresholdDays * 24 * 60 * 60 : 0;
 
-    const commands = [];
-    commands.push('docker image prune -f --filter "dangling=true"');
+    // Build cleanup script
+    const cleanupScript = `
+# 1) Prune dangling images
+docker image prune -f --filter \"dangling=true\"
 
-    const thresholdSeconds = thresholdDays ? thresholdDays * 60 : null;
+# 2) Remove exited containers older than threshold
+docker ps -a --format '{{.ID}}' | while read -r id; do
+  created=$(docker inspect --format='{{.Created}}' "$id" | cut -d. -f1)
+  createdSec=$(date -d "$created" +%s 2>/dev/null) || { echo "Skip $id: bad date"; continue; }
+  age=$(( $(date +%s) - createdSec ))
+  status=$(docker inspect --format='{{.State.Status}}' "$id")
+  if [ "$status" = "exited" ] && [ "$age" -gt ${thresholdSeconds} ]; then
+    echo "Removing stopped container $id (age=${age}s)"
+    docker rm -f "$id" || true
+  fi
+done
 
-    if (thresholdSeconds) {
-      commands.push(
-        `
-      docker ps -a --format "{{.ID}} {{.CreatedAt}}" | while read id createdAt; do
-        createdSec=$(date -d "$createdAt" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S %z" "$createdAt" +%s)
-        now=$(date +%s)
-        age=$((now - createdSec))
-        status=$(docker inspect --format='{{.State.Status}}' $id)
-        if [ "$age" -gt ${thresholdSeconds} ] && [ "$status" = "exited" ]; then
-          echo "Removing stopped container $id (older than ${thresholdDays} days)"
-          docker rm -f $id || true
-        fi
-      done
-        `.trim()
-      );
-      
-      commands.push(
-        `
-      docker images --format "{{.ID}} {{.Repository}}:{{.Tag}}" | while read id repo; do
-        created=$(docker inspect --format='{{.Created}}' $id | cut -d. -f1)
-        createdSec=$(date -d "$created" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$created" +%s)
-        now=$(date +%s)
-        age=$((now - createdSec))
-        inUse=$(docker ps -a --filter "ancestor=$id" --format '{{.ID}}' | wc -l | tr -d ' ')
-        if [ "$age" -gt ${thresholdSeconds} ] && [ "$inUse" -eq 0 ]; then
-          echo "Removing unused image: $repo (older than ${thresholdDays} days)"
-          docker rmi -f $id || true
-        fi
-      done
-        `.trim()
-      );
-    } else {
-      commands.push("docker container prune -f");
-      commands.push("docker image prune -a -f");
-    }
-    const finalCommand = commands.join(" && ");
-    core.info(`Generated Docker Cleanup Command:\n${finalCommand}`);
+# 3) Remove unused images older than threshold
+docker images --format '{{.ID}} {{.Repository}}:{{.Tag}}' | while read -r id repo; do
+  created=$(docker inspect --format='{{.Created}}' "$id" | cut -d. -f1)
+  createdSec=$(date -d "$created" +%s 2>/dev/null) || { echo "Skip image $id: bad date"; continue; }
+  age=$(( $(date +%s) - createdSec ))
+  inUse=$(docker ps -a --filter "ancestor=$id" --format '{{.ID}}')
+  if [ -z "$inUse" ] && [ "$age" -gt ${thresholdSeconds} ]; then
+    echo "Removing unused image $repo (age=${age}s)"
+    docker rmi -f "$id" || true
+  fi
+done
+`;
+
+    core.info("Generated cleanup script:");
+    core.info(cleanupScript);
 
     const sshScript = generateSSHScriptCommand(
-      finalCommand,
+      cleanupScript,
       key.trim(),
       username,
       host
     );
-    core.info("Executing remote cleanup...");
+    core.info("Executing remote cleanup via SSH...");
 
     exec(sshScript, (error, stdout, stderr) => {
       if (error) {
-        core.setFailed(`SSH Command Failed: ${error.message}`);
+        core.setFailed(`SSH Command failed: ${error.message}`);
         return;
       }
       core.info(`STDOUT:\n${stdout}`);
       if (stderr) core.error(`STDERR:\n${stderr}`);
     });
-  } catch (error) {
-    core.setFailed(error.message);
+  } catch (err) {
+    core.setFailed(err.message);
   }
 })();
