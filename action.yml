@@ -9,8 +9,14 @@ inputs:
     required: true
   key:
     description: 'Private SSH key'
-    required: true
-
+    required: true  
+  removeStoppedContainers:
+    description: 'Set to false to skip removing stopped containers'
+    required: false
+    default: 'true'
+  thresholdDays:
+    description: 'Remove unused images & containers older than X days (optional)'
+    required: false
 runs:
   using: 'node20'
   main: 'index.js'
