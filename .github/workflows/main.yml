@@ -3,12 +3,14 @@ name: "Test Cleanup Action"
 on: [push]
 
 jobs:
-  test-cleanup:
+  docker-cleanup:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-      - uses: ./ 
+
+      - name: Run Docker Cleanup
+        uses: ikrambagban/docker-pruner@v1
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USERNAME }}
