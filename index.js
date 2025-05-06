@@ -49,33 +49,33 @@ EOF
     if (thresholdSeconds) {
       commands.push(
         `
-    docker ps -a --format '{{.ID}} {{.CreatedAt}}' | while read id createdAt; do
-      createdSec=$(date -d "$createdAt" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S %z" "$createdAt" +%s)
-      now=$(date +%s)
-      age=$((now - createdSec))
-      status=$(docker inspect --format='{{.State.Status}}' $id)
-      if [ "$age" -gt ${thresholdSeconds} ] && [ "$status" = "exited" ]; then
-        echo "Removing stopped container $id (older than ${thresholdDays} days)"
-        docker rm -f $id || true
-      fi
-    done
-    `.trim()
+      docker ps -a --format "{{.ID}} {{.CreatedAt}}" | while read id createdAt; do
+        createdSec=$(date -d "$createdAt" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S %z" "$createdAt" +%s)
+        now=$(date +%s)
+        age=$((now - createdSec))
+        status=$(docker inspect --format='{{.State.Status}}' $id)
+        if [ "$age" -gt ${thresholdSeconds} ] && [ "$status" = "exited" ]; then
+          echo "Removing stopped container $id (older than ${thresholdDays} days)"
+          docker rm -f $id || true
+        fi
+      done
+        `.trim()
       );
-
+      
       commands.push(
         `
-    docker images --format '{{.ID}} {{.Repository}}:{{.Tag}}' | while read id repo; do
-      created=$(docker inspect --format='{{.Created}}' $id | cut -d. -f1)
-      createdSec=$(date -d "$created" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$created" +%s)
-      now=$(date +%s)
-      age=$((now - createdSec))
-      inUse=$(docker ps -a --filter "ancestor=$id" --format '{{.ID}}' | wc -l | tr -d ' ')
-      if [ "$age" -gt ${thresholdSeconds} ] && [ "$inUse" -eq 0 ]; then
-        echo "Removing unused image: $repo (older than ${thresholdDays} days)"
-        docker rmi -f $id || true
-      fi
-    done
-    `.trim()
+      docker images --format "{{.ID}} {{.Repository}}:{{.Tag}}" | while read id repo; do
+        created=$(docker inspect --format='{{.Created}}' $id | cut -d. -f1)
+        createdSec=$(date -d "$created" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$created" +%s)
+        now=$(date +%s)
+        age=$((now - createdSec))
+        inUse=$(docker ps -a --filter "ancestor=$id" --format '{{.ID}}' | wc -l | tr -d ' ')
+        if [ "$age" -gt ${thresholdSeconds} ] && [ "$inUse" -eq 0 ]; then
+          echo "Removing unused image: $repo (older than ${thresholdDays} days)"
+          docker rmi -f $id || true
+        fi
+      done
+        `.trim()
       );
     } else {
       commands.push("docker container prune -f");
