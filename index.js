@@ -8,9 +8,10 @@ function runSSHCommand(command, keyPath, username, host) {
   if (!username.match(/^[a-zA-Z0-9_-]+$/) || !host.match(/^[a-zA-Z0-9.-]+$/)) {
     throw new Error("Invalid username or host");
   }
-  const escapedCommand = command.replace(/'/g, "'\\''");
-  return `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "bash -c '${escapedCommand}'"`;
-  // return `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "${command}"`;
+  // Write command to a temporary script file to avoid quoting issues
+  const scriptPath = path.join(os.tmpdir(), "cleanup.sh");
+  fs.writeFileSync(scriptPath, `#!/bin/bash\n${command}`, { mode: 0o700 });
+  return `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "bash < ${scriptPath}"`;
 }
 
 (async () => {
@@ -37,7 +38,9 @@ function runSSHCommand(command, keyPath, username, host) {
       const commands = [];
       commands.push('docker image prune -f --filter "dangling=true"');
 
-      const thresholdSeconds = thresholdDays ? thresholdDays * 60 : null;
+      const thresholdSeconds = thresholdDays
+        ? thresholdDays * 60
+        : null;
 
       if (thresholdSeconds) {
         commands.push(
@@ -46,19 +49,21 @@ function runSSHCommand(command, keyPath, username, host) {
             createdSec=$(date -d "$createdAt" +%s 2>/dev/null || date -j -f "%Y-%m-%d %H:%M:%S %z" "$createdAt" +%s)
             now=$(date +%s)
             age=$((now - createdSec))
-            status=$(docker inspect --format='{{.State.Status}}' $id)
+            status=$(docker inspect --format="{{.State.Status}}" $id)
             if [ "$age" -gt ${thresholdSeconds} ] && [ "$status" = "exited" ]; then
               echo "Removing stopped container $id (older than ${thresholdDays} days)"
               docker rm -f $id || true
             fi
           done
-        `.replace(/\s+/g, " ")
+        `
+            .replace(/\s+/g, " ")
+            .trim()
         );
 
         commands.push(
           `
           docker images --format '{{.ID}} {{.Repository}}:{{.Tag}}' | while read id repo; do
-            created=$(docker inspect --format='{{.Created}}' $id | cut -d. -f1)
+            created=$(docker inspect --format="{{.Created}}" $id | cut -d. -f1)
             createdSec=$(date -d "$created" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$created" +%s)
             now=$(date +%s)
             age=$((now - createdSec))
@@ -68,22 +73,22 @@ function runSSHCommand(command, keyPath, username, host) {
               docker rmi -f $id || true
             fi
           done
-        `.replace(/\s+/g, " ")
+        `
+            .replace(/\s+/g, " ")
+            .trim()
         );
       } else {
         commands.push("docker container prune -f");
         commands.push("docker image prune -a -f");
       }
 
-      const finalCommand = runSSHCommand(
-        commands.join(" && "),
-        keyPath,
-        username,
-        host
-      );
-      core.info(`Executing Cleanup:\n${finalCommand}`);
+      const finalCommand = commands.join(" && ");
+      core.info(`Generated Command:\n${finalCommand}`);
 
-      exec(finalCommand, (error, stdout, stderr) => {
+      const sshCommand = runSSHCommand(finalCommand, keyPath, username, host);
+      core.info(`Executing Cleanup:\n${sshCommand}`);
+
+      exec(sshCommand, (error, stdout, stderr) => {
         if (error) {
           core.setFailed(`SSH Command Failed: ${error.message}`);
           return;
