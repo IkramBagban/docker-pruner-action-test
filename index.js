@@ -59,9 +59,7 @@ EOF
         docker rm -f $id || true
       fi
     done
-    `
-          .replace(/\s+/g, " ")
-          .trim()
+    `.trim()
       );
 
       commands.push(
@@ -77,9 +75,7 @@ EOF
         docker rmi -f $id || true
       fi
     done
-    `
-          .replace(/\s+/g, " ")
-          .trim()
+    `.trim()
       );
     } else {
       commands.push("docker container prune -f");
