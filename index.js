@@ -19,6 +19,8 @@ function runSSHCommand(command, keyPath, username, host) {
     const host = core.getInput("host", { required: true });
     const username = core.getInput("username", { required: true });
     const key = core.getInput("key", { required: true });
+    if (!key || !key.includes("PRIVATE KEY")) throw new Error("Invalid SSH private key");
+
     const thresholdDaysInput = core.getInput("thresholdDays");
     const thresholdDays = thresholdDaysInput
       ? parseInt(thresholdDaysInput)
