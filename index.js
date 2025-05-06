@@ -1,15 +1,32 @@
 const core = require('@actions/core');
-const github = require('@actions/github');
+const { exec } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-try {
-  // `who-to-greet` input defined in action metadata file
-  const nameToGreet = core.getInput('who-to-greet');
-  console.log(`Hello ${nameToGreet}!`);
-  const time = (new Date()).toTimeString();
-  core.setOutput("time", time);
-  // Get the JSON webhook payload for the event that triggered the workflow
-  const payload = JSON.stringify(github.context.payload, undefined, 2)
-  console.log(`The event payload: ${payload}`);
-} catch (error) {
-  core.setFailed(error.message);
-}
+(async () => {
+  try {
+    const host = core.getInput('host');
+    const username = core.getInput('username');
+    const key = core.getInput('key');
+
+    // Save SSH key to a temporary file
+    const keyPath = path.join(os.tmpdir(), 'vm_key.pem');
+    fs.writeFileSync(keyPath, key + '\n', { mode: 0o600 });
+
+    const command = `ssh -i ${keyPath} -o StrictHostKeyChecking=no ${username}@${host} "docker system prune -af"`;
+
+    core.info(`Running: ${command}`);
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        core.setFailed(`SSH Command Failed: ${error.message}`);
+        return;
+      }
+      core.info(`STDOUT: ${stdout}`);
+      if (stderr) core.warning(`STDERR: ${stderr}`);
+    });
+  } catch (error) {
+    core.setFailed(error.message);
+  }
+})();
