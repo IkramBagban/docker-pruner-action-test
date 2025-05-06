@@ -1,6 +1,6 @@
 name: "Test Cleanup Action"
 
-on: [workflow_dispatch]
+on: [push]
 
 jobs:
   test-cleanup:
